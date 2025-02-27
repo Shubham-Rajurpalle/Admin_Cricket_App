@@ -1,0 +1,135 @@
+package com.cricketapp.admin_cricket_app
+
+import android.net.Uri
+import android.os.Bundle
+import android.util.Log
+import android.view.View
+import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AppCompatActivity
+import com.cricketapp.admin_cricket_app.databinding.ActivityUploadShotBinding
+import com.google.firebase.FirebaseApp
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.storage.FirebaseStorage
+import com.google.firebase.storage.StorageReference
+
+class UploadShot : AppCompatActivity() {
+    private lateinit var binding: ActivityUploadShotBinding
+    private lateinit var videoStorageRef: StorageReference
+    private lateinit var thumbnailStorageRef: StorageReference
+    private lateinit var firestore: FirebaseFirestore
+    private var videoUri: Uri? = null
+    private var thumbnailUri: Uri? = null
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        binding = ActivityUploadShotBinding.inflate(layoutInflater)
+        setContentView(binding.root)
+
+        FirebaseApp.initializeApp(this)
+
+        videoStorageRef = FirebaseStorage.getInstance().reference.child("videos")
+        thumbnailStorageRef = FirebaseStorage.getInstance().reference.child("thumbnails")
+        firestore = FirebaseFirestore.getInstance()
+
+        binding.btnSelectVideo.setOnClickListener { selectVideo.launch("video/*") }
+        binding.btnSelectThumbnail.setOnClickListener { selectThumbnail.launch("image/*") }
+
+        binding.btnUploadVideo.setOnClickListener {
+            val title = binding.etVideoTitle.text.toString().trim()
+            if (title.isEmpty()) {
+                showToast("Enter a video title!")
+                return@setOnClickListener
+            }
+            if (videoUri == null || thumbnailUri == null) {
+                showToast("Select both video and thumbnail!")
+                return@setOnClickListener
+            }
+
+            binding.progressBar.visibility = View.VISIBLE
+            uploadThumbnail()
+        }
+    }
+
+    private val selectVideo =
+        registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+            if (uri != null) {
+                videoUri = uri
+                binding.tvSelectedVideo.text = "Selected: ${uri.lastPathSegment}"
+            }
+        }
+
+    private val selectThumbnail =
+        registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+            if (uri != null) {
+                thumbnailUri = uri
+                binding.ivThumbnail.apply {
+                    setImageURI(thumbnailUri)
+                    visibility = View.VISIBLE
+                }
+            }
+        }
+
+    private fun uploadThumbnail() {
+        val thumbRef = thumbnailStorageRef.child("${System.currentTimeMillis()}.jpg")
+        val uploadTask = thumbRef.putFile(thumbnailUri!!)
+
+        uploadTask.addOnProgressListener { snapshot ->
+            val progress = (100.0 * snapshot.bytesTransferred / snapshot.totalByteCount).toInt()
+            binding.progressBar.progress = progress
+        }.addOnSuccessListener {
+            thumbRef.downloadUrl.addOnSuccessListener { uri ->
+                thumbnailUri = uri
+                uploadVideo()
+            }
+        }.addOnFailureListener {
+            showToast("Thumbnail upload failed!")
+            binding.progressBar.visibility = View.GONE
+        }
+    }
+
+    private fun uploadVideo() {
+        val videoRef = videoStorageRef.child("${System.currentTimeMillis()}.mp4")
+        val uploadTask = videoRef.putFile(videoUri!!)
+
+        uploadTask.addOnProgressListener { snapshot ->
+            val progress = (100.0 * snapshot.bytesTransferred / snapshot.totalByteCount).toInt()
+            binding.progressBar.progress = progress
+        }.addOnSuccessListener {
+            videoRef.downloadUrl.addOnSuccessListener { videoUrl ->
+                saveDataToFirestore(videoUrl.toString(), thumbnailUri.toString())
+            }
+        }.addOnFailureListener {
+            showToast("Video upload failed!")
+            binding.progressBar.visibility = View.GONE
+        }
+    }
+
+    private fun saveDataToFirestore(videoUrl: String, thumbUrl: String) {
+        val title = binding.etVideoTitle.text.toString().trim()
+        val docRef = firestore.collection("videos").document()
+        val videoData = Video(
+            id = docRef.id,
+            title = title,
+            videoUrl = videoUrl,
+            thumbnailUrl = thumbUrl,
+            views = 0,
+            timestamp = System.currentTimeMillis()
+        )
+
+        docRef.set(videoData)
+            .addOnSuccessListener {
+                binding.progressBar.visibility = View.GONE
+                showToast("Video uploaded successfully!")
+                finish()
+            }
+            .addOnFailureListener {
+                showToast("Failed to upload video!")
+                binding.progressBar.visibility = View.GONE
+            }
+    }
+
+    private fun showToast(message: String) {
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+    }
+}
