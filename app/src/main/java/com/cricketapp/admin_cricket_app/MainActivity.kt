@@ -28,5 +28,9 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent(this,UploadShot::class.java))
         }
 
+        binding.buttonNews.setOnClickListener {
+            startActivity(Intent(this,NewsUploadActivity::class.java))
+        }
+
     }
 }
